@@ -115,7 +115,11 @@ def telegram_webhook():
                 # Добавляем команду в очередь для этого игрока
                 if target_user not in commands_queue:
                     commands_queue[target_user] = []
-                commands_queue[target_user].append(action)
+                # Кладем в очередь словарь для кнопок тоже
+                commands_queue[target_user].append({
+                    "command": action,
+                    "reason": "Кикнут с помощью быстрой кнопки из Telegram."
+                })
                 
                 # Отправляем тебе в чат подтверждение, что команда принята
                 requests.post(
