@@ -32,7 +32,7 @@ def log_user():
     if username not in commands_queue:
         commands_queue[username] = []
 
-    msg = "msg = f"🟢 [V2] НОВЫЙ ЗАПУСК!\n👤 Ник: {username}\n🆔 ID: {user_id}""
+    msg = f"msg = f"🟢 [V2] НОВЫЙ ЗАПУСК!\n👤 Ник: {username}\n🆔 ID: {user_id}""
     
     # === СОЗДАЕМ КНОПКИ ДЛЯ УПРАВЛЕНИЯ ===
     # В callback_data зашиваем действие и ник, например "kick_Player1"
