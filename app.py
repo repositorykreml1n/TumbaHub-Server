@@ -64,7 +64,25 @@ def get_command():
         return jsonify({"status": "success", "command": cmd})
     
     return jsonify({"status": "empty"})
+@app.route('/api/send_message', methods=['POST'])
+def send_message():
+    data = request.json
+    if not data or 'message' not in data:
+        return jsonify({"status": "error"}), 400
 
+    text_to_send = data['message']
+    
+    # Сервер получает текст от Роблокса и пересылает его тебе в Телеграм
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+        json={
+            "chat_id": TELEGRAM_CHAT_ID, 
+            "text": text_to_send,
+            "parse_mode": "Markdown"
+        }
+    )
+    
+    return jsonify({"status": "success"})
 
 @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
