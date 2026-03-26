@@ -200,6 +200,7 @@ def telegram_webhook():
                         "inline_keyboard": [
                             [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}],
                             [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
+                            [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}], # <--- НОВАЯ КНОПКА
                             [{"text": "🔙 Назад к списку", "callback_data": "menu_players"}]
                         ]
                     }
@@ -249,6 +250,17 @@ def telegram_webhook():
                     if target_user not in commands_queue: commands_queue[target_user] = []
                     commands_queue[target_user].append(action)
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💥 Краш отправлен {target_user}"})
+                
+                # --- РЕСЕТ ---
+                elif btn_action == "reset":
+                    action = "/reset"
+                    if target_user not in commands_queue: 
+                        commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"}
+                    )
                 
             # Убираем часики загрузки с нажатой кнопки
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
