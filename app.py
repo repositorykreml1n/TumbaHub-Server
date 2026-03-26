@@ -60,53 +60,40 @@ def get_command():
     return jsonify({"status": "empty"})
 
 @app.route('/api/telegram_webhook', methods=['POST'])
+def @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.json
     
-    # 1. ОБРАБОТКА ТЕКСТОВЫХ КОМАНД (если ты написал ручками /kick Player1)
-    if update and "message" in update and "text" in update["message"]:
-        chat_id = str(update["message"]["chat"]["id"])
-        text = update["message"]["text"]
-        
-        if chat_id == TELEGRAM_CHAT_ID:
-            parts = text.split(' ')
-            if len(parts) >= 2:
-                action = parts[0] # Например, /kick
-                target_user = parts[1] # Ник игрока
-                
-                if target_user not in commands_queue:
-                    commands_queue[target_user] = []
-                    
-                commands_queue[target_user].append(action)
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                              json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Команда {action} отправлена игроку {target_user}"})
-
-    # 2. ОБРАБОТКА НАЖАТИЯ КНОПОК
-    elif update and "callback_query" in update:
+    # ЕСЛИ НАЖАЛИ КНОПКУ (Callback Query)
+    if update and "callback_query" in update:
         callback = update["callback_query"]
         chat_id = str(callback["message"]["chat"]["id"])
-        data = callback["data"] # Достаем то, что зашили в кнопку (напр. "kick_Player1")
+        data = callback["data"] # Сюда прилетит "kick_ТвойНик" или "crash_ТвойНик"
         callback_id = callback["id"]
         
         if chat_id == TELEGRAM_CHAT_ID:
-            # Разбиваем "kick_Player1" на "kick" и "Player1"
+            # Разделяем "kick_ТвойНик" на действие ("kick") и ник ("ТвойНик")
             parts = data.split('_', 1)
             if len(parts) == 2:
-                action = f"/{parts[0]}" # Превращаем в формат команды со слешем: "/kick"
+                action = f"/{parts[0]}" # Делаем формат команды: "/kick"
                 target_user = parts[1]
                 
+                # Добавляем команду в очередь для этого игрока
                 if target_user not in commands_queue:
                     commands_queue[target_user] = []
-                    
                 commands_queue[target_user].append(action)
                 
-                # Отправляем подтверждение в чат
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                              json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ (Кнопка) Команда {action} отправлена игроку {target_user}"})
+                # Отправляем тебе в чат подтверждение, что команда принята
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Команда {action} отправлена в очередь для {target_user}"}
+                )
                 
-            # Важно: всегда нужно отвечать Телеграму, что клик обработан, иначе кнопка будет "зависать"
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                          json={"callback_query_id": callback_id})
+            # ВАЖНО: Говорим Телеграму, что мы обработали клик, чтобы на кнопке пропали "часики" загрузки
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": callback_id}
+            )
 
     return jsonify({"status": "ok"})
 
