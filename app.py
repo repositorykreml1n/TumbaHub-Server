@@ -69,7 +69,36 @@ def get_command():
 def @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.json
-    
+    # ЕСЛИ НАПИСАЛИ ТЕКСТ РУКАМИ
+    if update and "message" in update and "text" in update["message"]:
+        chat_id = str(update["message"]["chat"]["id"])
+        text = update["message"]["text"]
+        
+        if chat_id == TELEGRAM_CHAT_ID:
+            # Фишка: split(' ', 2) разобьет текст максимум на 3 части.
+            # Пример: "/kick BaconHair Твоя причина" -> ["/kick", "BaconHair", "Твоя причина"]
+            parts = text.split(' ', 2)
+            
+            if len(parts) >= 2:
+                action = parts[0] # Команда: "/kick"
+                target_user = parts[1] # Ник: "BaconHair"
+                
+                # Если ты написал причину (3-я часть) - берем её. Иначе ставим дефолт.
+                reason = parts[2] if len(parts) == 3 else "Вы были кикнуты администратором TumbaHub."
+                
+                if target_user not in commands_queue:
+                    commands_queue[target_user] = []
+                    
+                # Кладем в очередь СЛОВАРЬ
+                commands_queue[target_user].append({
+                    "command": action,
+                    "reason": reason
+                })
+                
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Команда {action} для {target_user}\n💬 Причина: {reason}"}
+                )
     # ЕСЛИ НАЖАЛИ КНОПКУ (Callback Query)
     if update and "callback_query" in update:
         callback = update["callback_query"]
