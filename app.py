@@ -88,10 +88,10 @@ def telegram_webhook():
                 }
                 requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    data={
+                    json={
                         "chat_id": TELEGRAM_CHAT_ID, 
                         "text": "🎛 **Главное меню TumbaHub**\nВыберите раздел:",
-                        "reply_markup": json.dumps(keyboard),
+                        "reply_markup": keyboard,
                         "parse_mode": "Markdown"
                     }
                 )
@@ -177,10 +177,10 @@ def telegram_webhook():
                     keyboard = {"inline_keyboard": player_buttons}
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                        data={
+                        json={
                             "chat_id": TELEGRAM_CHAT_ID, 
                             "text": "👥 **Список активных игроков:**\nВыберите кого-нибудь для управления:",
-                            "reply_markup": json.dumps(keyboard),
+                            "reply_markup": keyboard,
                             "parse_mode": "Markdown"
                         }
                     )
@@ -205,10 +205,10 @@ def telegram_webhook():
                     }
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        data={
+                        json={
                             "chat_id": TELEGRAM_CHAT_ID, 
                             "text": f"👤 **Профиль: {target_user}**\nЧто будем делать с этим игроком?", 
-                            "reply_markup": json.dumps(keyboard),
+                            "reply_markup": keyboard,
                             "parse_mode": "Markdown"
                         }
                     )
@@ -232,7 +232,7 @@ def telegram_webhook():
                     keyboard = {"inline_keyboard": [[{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}]]}
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        data={"chat_id": TELEGRAM_CHAT_ID, "text": f"Напиши причину кика для {target_user} или нажми кнопку ниже:", "reply_markup": json.dumps(keyboard)}
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"Напиши причину кика для {target_user} или нажми кнопку ниже:", "reply_markup": keyboard}
                     )
                 
                 elif btn_action == "defaultkick":
