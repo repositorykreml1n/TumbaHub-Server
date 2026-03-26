@@ -1,5 +1,9 @@
 from flask import Flask, request, jsonify
 import requests
+import json # Обязательно!
+
+commands_queue = {}
+awaiting_reason = {} # Память бота
 
 app = Flask(__name__)
 
