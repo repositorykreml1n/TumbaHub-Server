@@ -50,7 +50,6 @@ def log_user():
     return jsonify({"status": "success"})
 
 @app.route('/api/get_command', methods=['GET'])
-@app.route('/api/get_command', methods=['GET'])
 def get_command():
     username = request.args.get('username')
     
