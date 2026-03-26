@@ -68,68 +68,109 @@ def get_command():
 
 @app.route('/api/telegram_webhook', methods=['POST'])
 def @app.route('/api/telegram_webhook', methods=['POST'])
+@app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.json
-    # ЕСЛИ НАПИСАЛИ ТЕКСТ РУКАМИ
+    
+    # 1. ОБРАБОТКА ТЕКСТА
     if update and "message" in update and "text" in update["message"]:
         chat_id = str(update["message"]["chat"]["id"])
         text = update["message"]["text"]
         
         if chat_id == TELEGRAM_CHAT_ID:
-            # Фишка: split(' ', 2) разобьет текст максимум на 3 части.
-            # Пример: "/kick BaconHair Твоя причина" -> ["/kick", "BaconHair", "Твоя причина"]
-            parts = text.split(' ', 2)
-            
-            if len(parts) >= 2:
-                action = parts[0] # Команда: "/kick"
-                target_user = parts[1] # Ник: "BaconHair"
-                
-                # Если ты написал причину (3-я часть) - берем её. Иначе ставим дефолт.
-                reason = parts[2] if len(parts) == 3 else "Вы были кикнуты администратором TumbaHub."
+            # Проверяем, ждет ли бот от нас причину кика
+            if chat_id in awaiting_reason:
+                target_user = awaiting_reason.pop(chat_id) # Достаем ник и удаляем из режима ожидания
+                action = f"/kick_{text}" # Формируем команду для Роблокса
                 
                 if target_user not in commands_queue:
                     commands_queue[target_user] = []
-                    
-                # Кладем в очередь СЛОВАРЬ
-                commands_queue[target_user].append({
-                    "command": action,
-                    "reason": reason
-                })
+                commands_queue[target_user].append(action)
                 
                 requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Команда {action} для {target_user}\n💬 Причина: {reason}"}
+                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} кикнут с причиной:\n💬 {text}"}
                 )
-    # ЕСЛИ НАЖАЛИ КНОПКУ (Callback Query)
+                return jsonify({"status": "ok"})
+
+            # Если бот ничего не ждал, обрабатываем как обычную ручную команду (/kick_Причина Ник)
+            parts = text.split(' ', 2)
+            if len(parts) >= 2:
+                action = parts[0]
+                target_user = parts[1]
+                
+                if target_user not in commands_queue:
+                    commands_queue[target_user] = []
+                commands_queue[target_user].append(action)
+                
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Ручная команда {action} отправлена {target_user}"}
+                )
+
+    # 2. ОБРАБОТКА НАЖАТИЯ КНОПОК
     if update and "callback_query" in update:
         callback = update["callback_query"]
         chat_id = str(callback["message"]["chat"]["id"])
-        data = callback["data"] # Сюда прилетит "kick_ТвойНик" или "crash_ТвойНик"
+        data = callback["data"]
         callback_id = callback["id"]
         
         if chat_id == TELEGRAM_CHAT_ID:
-            # Разделяем "kick_ТвойНик" на действие ("kick") и ник ("ТвойНик")
             parts = data.split('_', 1)
             if len(parts) == 2:
-                action = f"/{parts[0]}" # Делаем формат команды: "/kick"
+                btn_action = parts[0]
                 target_user = parts[1]
                 
-                # Добавляем команду в очередь для этого игрока
-                if target_user not in commands_queue:
-                    commands_queue[target_user] = []
-                # Кладем в очередь словарь для кнопок тоже
-                commands_queue[target_user].append({
-                    "command": action,
-                    "reason": "Кикнут с помощью быстрой кнопки из Telegram."
-                })
+                # Если нажали первую кнопку "Kick"
+                if btn_action == "kick":
+                    # Включаем режим ожидания текста для этого чата
+                    awaiting_reason[chat_id] = target_user
+                    
+                    # Создаем кнопку для дефолтного кика
+                    keyboard = {
+                        "inline_keyboard": [
+                            [{"text": "Дефолт: Вы были кикнуты админом TumbaHub", "callback_data": f"defaultkick_{target_user}"}]
+                        ]
+                    }
+                    
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                        json={
+                            "chat_id": TELEGRAM_CHAT_ID, 
+                            "text": f"Напиши в чат причину кика для **{target_user}** или нажми кнопку ниже:",
+                            "reply_markup": keyboard,
+                            "parse_mode": "Markdown"
+                        }
+                    )
                 
-                # Отправляем тебе в чат подтверждение, что команда принята
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Команда {action} отправлена в очередь для {target_user}"}
-                )
+                # Если нажали кнопку дефолтного кика
+                elif btn_action == "defaultkick":
+                    if chat_id in awaiting_reason:
+                        del awaiting_reason[chat_id] # Выходим из режима ожидания
+                        
+                    action = "/kick"
+                    if target_user not in commands_queue:
+                        commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} кикнут со стандартной причиной."}
+                    )
+                    
+                # Если нажали Crash
+                elif btn_action == "crash":
+                    action = "/crash"
+                    if target_user not in commands_queue:
+                        commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💥 Отправлен краш клиенту {target_user}"}
+                    )
                 
-            # ВАЖНО: Говорим Телеграму, что мы обработали клик, чтобы на кнопке пропали "часики" загрузки
+            # Закрываем загрузку на кнопке
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
                 json={"callback_query_id": callback_id}
