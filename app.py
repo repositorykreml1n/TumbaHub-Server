@@ -65,11 +65,32 @@ def get_command():
     
     return jsonify({"status": "empty"})
 
-@app.route('/api/telegram_webhook', methods=['POST'])
-def @app.route('/api/telegram_webhook', methods=['POST'])
+
 @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.json
+    
+    # === БЛОК 1: ОБРАБОТКА ТЕКСТА ===
+    if update and "message" in update and "text" in update["message"]:
+        # Здесь должен быть код, который проверяет awaiting_reason 
+        # и код со split(' ', 2) для команд формата "/kick Ник Причина"
+        pass # (Твой код)
+
+    # === БЛОК 2: ОБРАБОТКА КНОПОК ===
+    if update and "callback_query" in update:
+        # Здесь мы достаем btn_action и target_user
+        
+        # Если нажали "kick"
+        # Отправляем сообщение "Напиши причину..." (используй вариант с json.dumps)
+        
+        # Если нажали "defaultkick"
+        # Убираем из awaiting_reason и кидаем /kick в очередь
+        
+        # Если нажали "crash"
+        # Кидаем /crash в очередь
+        pass # (Твой код)
+
+    return jsonify({"status": "ok"})
     
     # Если нажали первую кнопку "Kick"
                 if btn_action == "kick":
