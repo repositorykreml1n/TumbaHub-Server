@@ -50,12 +50,18 @@ def log_user():
     return jsonify({"status": "success"})
 
 @app.route('/api/get_command', methods=['GET'])
+@app.route('/api/get_command', methods=['GET'])
 def get_command():
     username = request.args.get('username')
     
     if username in commands_queue and len(commands_queue[username]) > 0:
-        cmd = commands_queue[username].pop(0)
-        return jsonify({"status": "success", "command": cmd})
+        cmd_data = commands_queue[username].pop(0)
+        # Теперь мы возвращаем JSON, в котором есть и команда, и причина
+        return jsonify({
+            "status": "success", 
+            "command": cmd_data["command"],
+            "reason": cmd_data["reason"]
+        })
     
     return jsonify({"status": "empty"})
 
