@@ -64,25 +64,7 @@ def get_command():
         return jsonify({"status": "success", "command": cmd})
     
     return jsonify({"status": "empty"})
-@app.route('/api/send_message', methods=['POST'])
-def send_message():
-    data = request.json
-    if not data or 'message' not in data:
-        return jsonify({"status": "error"}), 400
 
-    text_to_send = data['message']
-    
-    # Сервер получает текст от Роблокса и пересылает его тебе в Телеграм
-    requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-        json={
-            "chat_id": TELEGRAM_CHAT_ID, 
-            "text": text_to_send,
-            "parse_mode": "Markdown"
-        }
-    )
-    
-    return jsonify({"status": "success"})
 
 @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
@@ -128,15 +110,24 @@ def telegram_webhook():
                 )
                 return jsonify({"status": "ok"})
 
-            # 2. Если написали ручную команду (/kick Ник Причина)
+            # 2. Если написали ручную команду
             parts = text.split(' ', 2)
             if len(parts) >= 2:
                 base_cmd = parts[0]
                 target_user = parts[1]
                 
+                # Если это кик
                 if base_cmd == "/kick" and len(parts) == 3:
                     reason = parts[2]
                     action = f"/kick_{reason}" 
+                    
+                # === НОВАЯ КОМАНДА EXECUTE ===
+                elif base_cmd == "/execute" and len(parts) == 3:
+                    script_code = parts[2]
+                    # Склеиваем команду и код через двойное подчеркивание
+                    action = f"/execute__{script_code}"
+                # ==============================
+                
                 else:
                     action = base_cmd
                 
