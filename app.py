@@ -76,6 +76,25 @@ def telegram_webhook():
         text = update["message"]["text"]
         
         if chat_id == TELEGRAM_CHAT_ID:
+            # === ГЛАВНОЕ МЕНЮ ===
+            if text == "/menu":
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "👥 Игроки", "callback_data": "menu_players"}],
+                        [{"text": "🎮 Игры", "callback_data": "menu_games"}]
+                    ]
+                }
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                    data={
+                        "chat_id": TELEGRAM_CHAT_ID, 
+                        "text": "🎛 **Главное меню TumbaHub**\nВыберите нужный раздел:",
+                        "reply_markup": json.dumps(keyboard)
+                    }
+                )
+                return jsonify({"status": "ok"})
+            # ====================
+
             # 1. Если бот ждет причину кика после нажатия кнопки
             if chat_id in awaiting_reason:
                 target_user = awaiting_reason.pop(chat_id) # Достаем ник
@@ -120,6 +139,39 @@ def telegram_webhook():
         callback_id = callback["id"]
         
         if chat_id == TELEGRAM_CHAT_ID:
+            # === КНОПКИ ГЛАВНОГО МЕНЮ ===
+            if data == "menu_games":
+                # Выводим всплывающее уведомление прямо в Телеграме (show_alert=True)
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": "Раздел Игры пока в разработке!", "show_alert": True}
+                )
+                return jsonify({"status": "ok"})
+                
+            elif data == "menu_players":
+                # Закрываем часики загрузки на кнопке
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id}
+                )
+                
+                if len(commands_queue) == 0:
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": "⚠️ База пуста. Нет подключенных игроков."}
+                    )
+                else:
+                    # Рассылаем команду /check_status всем, кто есть в очереди
+                    for user in commands_queue:
+                        commands_queue[user].append("/check_status")
+                    
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"📡 Команда /check_status отправлена всем известным игрокам ({len(commands_queue)} чел.).\nОжидаем ответные логи..."}
+                    )
+                return jsonify({"status": "ok"})
+            # ============================
+
             parts = data.split('_', 1)
             if len(parts) == 2:
                 btn_action = parts[0]
