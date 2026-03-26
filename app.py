@@ -9,6 +9,8 @@ TELEGRAM_CHAT_ID = '8426928414'
 
 # Очередь команд
 commands_queue = {}
+# Память для ожидания причины кика
+awaiting_reason = {}
 
 @app.route('/')
 def home():
