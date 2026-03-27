@@ -13,7 +13,7 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8693862606:AAEvhj2EJeSxHhaw0JopIb_
 # Admin IDs
 # FULL_ADMINS have access to everything, including Crash and Execute.
 # SEMI_ADMINS have access to most functions except the most dangerous ones.
-FULL_ADMINS_STR = os.getenv('FULL_ADMINS', '8426928414')
+FULL_ADMINS_STR = os.getenv('FULL_ADMINS', '8426928414,8509521287')
 SEMI_ADMINS_STR = os.getenv('SEMI_ADMINS', '1165708688')
 
 FULL_ADMINS = [int(admin_id.strip()) for admin_id in FULL_ADMINS_STR.split(',') if admin_id.strip()]
