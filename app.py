@@ -8,15 +8,23 @@ import os
 app = Flask(__name__)
 
 # Твои данные Телеграма
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '8426928414')
+# ВНИМАНИЕ: Вставь сюда НОВЫЙ токен от BotFather!
+TELEGRAM_TOKEN = os.getenv('8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
+
+# Читаем админов: либо из среды (через запятую), либо дефолтный список
+# Замени 111111111 на ID твоего друга!
+env_admins = os.getenv('ALLOWED_ADMINS', '8426928414,1165708688') 
+
+# Превращаем строку "ID1,ID2" в нормальный список чисел Python:
+ALLOWED_ADMINS = [int(admin_id.strip()) for admin_id in env_admins.split(',')]
 
 # --- НАСТРОЙКИ GITHUB DB ---
-# ВАЖНО: Вставь сюда свой НОВЫЙ токен!
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '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a')
+# ВНИМАНИЕ: Вставь сюда НОВЫЙ токен от GitHub!
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', 'ТВОЙ_НОВЫЙ_ТОКЕН_ГИТХАБ')
 REPO_OWNER = 'repositorykreml1n'
 REPO_NAME = 'commands'
 FILE_PATH = 'players.json'
+
 
 def load_players_from_github():
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
