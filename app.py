@@ -13,7 +13,7 @@ TELEGRAM_TOKEN = os.getenv('8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
 
 # Читаем админов: либо из среды (через запятую), либо дефолтный список
 # Замени 111111111 на ID твоего друга!
-env_admins = os.getenv('ALLOWED_ADMINS', '8426928414,1165708688') 
+env_admins = os.getenv('ALLOWED_ADMINS', '8426928414') 
 
 # Превращаем строку "ID1,ID2" в нормальный список чисел Python:
 ALLOWED_ADMINS = [int(admin_id.strip()) for admin_id in env_admins.split(',')]
