@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import base64 # Обязательно добавляем для работы с GitHub
+import time
 
 app = Flask(__name__)
 
@@ -62,6 +63,7 @@ def save_players_to_github():
 commands_queue = load_players_from_github()
 awaiting_reason = {}
 awaiting_execute = {}
+last_seen = {}
 
 @app.route('/')
 def home():
@@ -81,6 +83,8 @@ def log_user():
         commands_queue[username] = []
         # Сохраняем в GitHub!
         save_players_to_github()
+        
+    last_seen[username] = time.time()
 
     msg = f"🟢 [V2] НОВЫЙ ЗАПУСК!\n👤 Ник: {username}\n🆔 ID: {user_id}"
     
@@ -103,6 +107,13 @@ def log_user():
                       "reply_markup": keyboard
                   })
 
+    return jsonify({"status": "success"})
+
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    username = request.args.get('username')
+    if username:
+        last_seen[username] = time.time()
     return jsonify({"status": "success"})
 
 @app.route('/api/get_command', methods=['GET'])
@@ -219,8 +230,15 @@ def telegram_webhook():
                 else:
                     # Генерируем кнопки-ники
                     player_buttons = []
+                    current_time = time.time()
                     for player in commands_queue.keys():
-                        player_buttons.append([{"text": f"👤 {player}", "callback_data": f"playerprof_{player}"}])
+                        # Если игрок пинговал сервер меньше 45 секунд назад -> Онлайн
+                        if player in last_seen and (current_time - last_seen[player] < 45):
+                            status_icon = "🟢"
+                        else:
+                            status_icon = "🔴"
+                            
+                        player_buttons.append([{"text": f"{status_icon} {player}", "callback_data": f"playerprof_{player}"}])
                     
                     keyboard = {"inline_keyboard": player_buttons}
                     requests.post(
